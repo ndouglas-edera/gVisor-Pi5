@@ -155,3 +155,92 @@ sudo docker run --rm --runtime=runsc ubuntu:24.04 sh -c '
 
 The ```Seccomp: 2``` field, if shown, means seccomp filtering is active for that process. <br/>
 It is a useful signal but does not, by itself, establish that all gVisor protections are active or correctly configured.
+
+### Confirm the actual runtime of a long-running container
+```
+sudo docker run -d --runtime=runsc --name isolation-demo \
+  ubuntu:24.04 sleep 600
+```
+
+Inspect its runtime:
+```
+sudo docker inspect --format \
+  'Runtime={{.HostConfig.Runtime}} Status={{.State.Status}}' \
+  isolation-demo
+```
+
+**Expected**: ```runtime=runsc Status=running```
+
+
+Clean it up afterwards:
+```
+sudo docker rm -f isolation-demo
+```
+
+**Important distinction**: gVisor provides an additional **[userspace-kernel sandbox](https://agent-sandbox.sigs.k8s.io/docs/use-cases/gvisor-isolation/#:~:text=Linux%20kernel%20in%20userspace)**. <br/>
+Docker ```namespaces```, ```capabilities```, ```mounts```, and ```network``` settings still matter. <br/>
+These commands demonstrate the config and some isolation properties. They are not a substitute for a security assessment.
+
+### Host OS and kernel
+My expected key values are ```Debian 13```, ```aarch64```, and a page size of ```4096``` bytes.<br/> 
+I keep the page size for compatibility with my current gVisor build, as it used to cause issues.
+```
+echo "=== Operating system ==="
+cat /etc/os-release
+
+echo
+echo "=== Kernel ==="
+uname -a
+
+echo
+echo "=== Architecture ==="
+uname -m
+
+echo
+echo "=== Memory ==="
+free -h
+
+echo
+echo "=== Disk space ==="
+df -h /
+
+echo
+echo "=== Kernel page size ==="
+getconf PAGE_SIZE
+```
+
+Docker and gVisor versions:
+```
+echo "=== Docker version ==="
+sudo docker version
+
+echo
+echo "=== gVisor version ==="
+sudo runsc --version
+
+echo
+echo "=== Registered Docker runtimes ==="
+sudo docker info --format '{{json .Runtimes}}' | python3 -m json.tool
+
+echo
+echo "=== Docker service ==="
+sudo systemctl is-active docker
+
+echo
+echo "=== Tailscale service ==="
+sudo systemctl is-active tailscaled
+```
+
+### Identify the gVisor platform
+gVisor is a **sandboxing runtime**, not a traditional hardware-backed VMM like KVM. <br/>
+My installed runtime was previously reported as using the ```systrap``` platform.
+```
+sudo runsc --help 2>&1 | grep -i -A2 platform
+```
+To inspect the configured runtime and version together:
+```
+sudo runsc --version
+sudo docker info --format 'Runtimes: {{json .Runtimes}}'
+```
+The runtime version tells you which gVisor release is installed. <br/>
+The platform option tells you how gVisor implements its sandbox on the host.
