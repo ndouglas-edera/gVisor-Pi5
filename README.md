@@ -175,11 +175,17 @@ The command runs ```sh -c```, which launches ```grep```. <br/>
 Because grep reads ```/proc/self/status```, output describes ```grep``` process, not necessarily the shell or other processes in the container.
 
 | Result | Interpretation |
-| :---------------- | :------: |
+| :---------------- | :---------------- |
 | ```Seccomp: 0``` | No seccomp filter is reported for that process |
 | ```Seccomp: 2``` | A seccomp filter is active for that process |
 | ```NoNewPrivs: 0``` | The process ```no_new_privs``` flag **is not** set |
 | ```NoNewPrivs: 1``` | The process ```no_new_privs``` flag **is** set |
+
+Neither ```NoNewPrivs: 0``` nor ```Seccomp: 0``` alone proves that gVisor isolation is absent. <br/>
+gVisor provides a userspace-kernel, and its security properties are not adequately measured by these 2 fields alone.
+<br/><br/>
+**One important caveat**: gVisor's sandboxing model differs from ordinary Docker containers using the standard Linux runtime.<br/>
+Dont assume that a process inside gVisor must show ```Seccomp: 2``` for gVisor's isolation to be working correctly.
 
 ### Confirm the actual runtime of a long-running container
 ```
