@@ -262,3 +262,9 @@ sudo docker info --format 'Runtimes: {{json .Runtimes}}'
 ```
 The runtime version tells you which gVisor release is installed. <br/>
 The platform option tells you how gVisor implements its sandbox on the host.
+
+<br/><br/>
+Instant shutdown of my Raspberry Pi sitting at home
+```
+sudo shutdown -h now
+```
