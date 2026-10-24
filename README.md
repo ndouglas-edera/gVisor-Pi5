@@ -174,6 +174,13 @@ PPid:   1
 The command runs ```sh -c```, which launches ```grep```. <br/>
 Because grep reads ```/proc/self/status```, output describes ```grep``` process, not necessarily the shell or other processes in the container.
 
+| Result | Interpretation |
+| :---------------- | :------: |
+| ```Seccomp: 0``` | No seccomp filter is reported for that process |
+| ```Seccomp: 2``` | A seccomp filter is active for that process |
+| ```NoNewPrivs: 0``` | The process ```no_new_privs``` flag **is not** set |
+| ```NoNewPrivs: 1``` | The process ```no_new_privs``` flag **is** set |
+
 ### Confirm the actual runtime of a long-running container
 ```
 sudo docker run -d --runtime=runsc --name isolation-demo \
