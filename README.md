@@ -105,3 +105,53 @@ sudo docker run --rm -it --runtime=runsc \
 ```
 
 While that shell is open, use a **second SSH session** to run ```sudo docker ps``` and see it listed. Type ```exit``` to stop it.
+
+## Demonstrate gVisor Isolation
+These checks demonstrate that the container is running under gVisor and has a separate process view. <br/>
+They are useful sanity checks, not a complete proof that every security boundary is unbreakable.
+<br/><br/>
+Comparing the host and container kernels
+```
+echo "=== Host kernel ==="
+uname -r
+```
+```
+echo "=== Container kernel as reported by gVisor ==="
+sudo docker run --rm --runtime=runsc ubuntu:24.04 uname -r
+```
+
+You should see different results:
+- **Host**: ```6.18.50+rpt-rpi-v8```
+- **Container**: ```4.19.0-gvisor```
+
+The container sees gVisor’s implemented Linux-compatible kernel interface rather than simply reporting the host kernel version.
+
+### Compare process views
+On the host:
+```
+echo "=== Host process count ==="
+ps -e --no-headers | wc -l
+```
+
+Inside a fresh gVisor container:
+```
+sudo docker run --rm --runtime=runsc ubuntu:24.04 sh -c '
+  echo "=== Container PID 1 ==="
+  cat /proc/1/comm
+  echo "=== Container process list ==="
+  ps -ef
+'
+```
+The container should have its own container-scoped process view. <br/>
+Exact process counts will vary, and process isolation is also provided by Docker’s namespaces.
+
+### Inspect security-related process settings
+This reports process security fields exposed inside the container:
+```
+sudo docker run --rm --runtime=runsc ubuntu:24.04 sh -c '
+  grep -E "^(Name|Pid|PPid|NoNewPrivs|Seccomp):" /proc/self/status
+'
+```
+
+The ```Seccomp: 2``` field, if shown, means seccomp filtering is active for that process. <br/>
+It is a useful signal but does not, by itself, establish that all gVisor protections are active or correctly configured.
