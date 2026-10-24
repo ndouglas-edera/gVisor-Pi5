@@ -103,6 +103,12 @@ For a quick interactive workload to practise with:
 sudo docker run --rm -it --runtime=runsc \
   --name gvisor-shell ubuntu:24.04 bash
 ```
+Confirm that the container is running on a different kernel to the host:
+```
+uname -r
+```
+- Docker: ```4.19.0-gvisor```
+- RPI5: ```6.18.50+rpt-rpi-v8```
 
 While that shell is open, use a **second SSH session** to run ```sudo docker ps``` and see it listed. Type ```exit``` to stop it.
 
