@@ -9,7 +9,7 @@ My current working baseline is:
 - Ubuntu 24.04 containers running successfully under gVisor
 
 Check whether the Tailscale nodes are online <br/>
-Lists the tailnet devices and their status.
+Listing the tailnet devices and their status.
 ```
 tailscale status
 ```
