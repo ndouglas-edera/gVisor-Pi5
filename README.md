@@ -1,7 +1,7 @@
 # gVisor-Pi5
 Getting gVisor running on my Raspberry Pi5
 
-# Current Setup
+## Current Setup
 My current working baseline is:
 - Debian 13 on ARM64
 - Kernel ```rpi-v8``` with 4 KiB pages
@@ -13,7 +13,10 @@ Lists the tailnet devices and their status.
 ```
 tailscale status
 ```
-
+Got a fixed IP for this device for Kubecon:
+```
+ssh nigeldouglas@100.115.36.12
+```
 Rename the Pi’s hostname to ```gvisor``` <br/>
 (This never worked):
 ```
@@ -38,3 +41,31 @@ sudo sed -i 's/^127\.0\.1\.1.*/127.0.1.1 gvisor/' /etc/cloud/templates/hosts.deb
 ```
 
 <img width="1011" height="208" alt="Screenshot 2026-10-24 at 17 05 40" src="https://github.com/user-attachments/assets/a2500278-094c-490d-a797-9c0ebe025059" />
+
+## Check that gVisor is installed and working
+
+Show the ```version``` of gVisor installed:
+```
+sudo runsc --version
+```
+
+Confirm Docker knows about the ```runsc``` runtime
+```
+sudo docker info --format '{{json .Runtimes}}' | python3 -m json.tool
+```
+
+Run a fresh ```Ubuntu 20.04``` test container under gVisor
+```
+sudo docker run --rm --runtime=runsc ubuntu:24.04 \
+  sh -c 'echo "gVisor OK"; uname -rm'
+```
+
+Check Docker’s ```default runtime```:
+```
+sudo docker info --format 'Default runtime: {{.DefaultRuntime}}'
+```
+
+Check the runtime configuration:
+```
+sudo cat /etc/docker/daemon.json
+```
