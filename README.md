@@ -161,6 +161,18 @@ sudo docker run --rm --runtime=runsc ubuntu:24.04 sh -c '
 
 The ```Seccomp: 2``` field, if shown, means seccomp filtering is active for that process. <br/>
 It is a useful signal but does not, by itself, establish that all gVisor protections are active or correctly configured.
+<br/><br/>
+I should investigate ```NoNewPrivs: 0``` and ```Seccomp: 0``` if present. <br/>
+The ```Seccomp: 0``` means that the process represented by ```/proc/self/status``` is not currently using seccomp filtering <br/>
+This was reported by the ```procfs``` interface. It does not, by itself, prove that gVisor (```runsc```) is not providing isolation.<br/>
+However, my output initially started with:
+```
+Name:   grep
+Pid:    2
+PPid:   1
+```
+The command runs ```sh -c```, which launches ```grep```. <br/>
+Because grep reads ```/proc/self/status```, output describes ```grep``` process, not necessarily the shell or other processes in the container.
 
 ### Confirm the actual runtime of a long-running container
 ```
