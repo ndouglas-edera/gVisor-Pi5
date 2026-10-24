@@ -57,7 +57,7 @@ sudo docker info --format '{{json .Runtimes}}' | python3 -m json.tool
 Run a fresh ```Ubuntu 20.04``` test container under gVisor
 ```
 sudo docker run --rm --runtime=runsc ubuntu:24.04 \
-  sh -c 'echo "gVisor workload deployed SUCCESSFULLY"; uname -rm'
+  sh -c 'echo "gVisor workload tested SUCCESSFULLY"; uname -rm'
 ```
 
 Check Docker’s ```default runtime```:
