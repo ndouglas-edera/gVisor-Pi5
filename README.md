@@ -62,7 +62,7 @@ sudo docker run --rm --runtime=runsc ubuntu:24.04 \
 
 Check Docker’s ```default runtime```:
 ```
-sudo docker info --format 'Default runtime: {{.DefaultRuntime}}'
+sudo docker info --format 'Default runtime: {{.DefaultRuntime}}' | grep runc
 ```
 
 Check the runtime configuration:
