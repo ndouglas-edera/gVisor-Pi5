@@ -3,9 +3,9 @@ Getting gVisor running on my Raspberry Pi5
 
 ## Current Setup
 My current working baseline is:
-- Debian 13 on ARM64
-- Kernel ```rpi-v8``` with 4 KiB pages
-- Docker runtime ```runsc```
+- Debian 13 on ```ARM64```
+- The Docker runtime ```runsc```
+- Kernel ```rpi-v8``` with **[4 KiB pages](https://forums.raspberrypi.com/viewtopic.php?t=393687)**
 - Ubuntu 24.04 containers running successfully under gVisor
 
 Check whether the Tailscale nodes are online <br/>
