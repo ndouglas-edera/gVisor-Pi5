@@ -69,3 +69,39 @@ Check the runtime configuration:
 ```
 sudo cat /etc/docker/daemon.json
 ```
+
+## List running workloads
+Running containers only
+```
+sudo docker ps
+```
+All containers, including stopped ones
+```
+sudo docker ps -a
+```
+Compact list of running containers
+```
+sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.RunningFor}}'
+```
+Live CPU and memory usage
+```
+sudo docker stats
+```
+
+If you want to see which runtime a particular container uses:
+```
+sudo docker inspect --format \
+  'Name={{.Name}} Runtime={{.HostConfig.Runtime}} Status={{.State.Status}}' \
+  CONTAINER_NAME
+```
+
+Replace ```CONTAINER_NAME``` with a name from ```docker ps```.<br/> 
+A container created with ```--runtime=runsc``` should show ```Runtime=runsc```.
+<br/><br/>
+For a quick interactive workload to practise with:
+```
+sudo docker run --rm -it --runtime=runsc \
+  --name gvisor-shell ubuntu:24.04 bash
+```
+
+While that shell is open, use a **second SSH session** to run ```sudo docker ps``` and see it listed. Type ```exit``` to stop it.
