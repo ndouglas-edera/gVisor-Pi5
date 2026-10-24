@@ -65,9 +65,9 @@ Check Docker’s ```default runtime```:
 sudo docker info --format 'Default runtime: {{.DefaultRuntime}}' | grep runc
 ```
 
-Check the runtime configuration:
+Check the runtime config to make sure path set to ```/usr/bin/runsc```:
 ```
-sudo cat /etc/docker/daemon.json
+sudo cat /etc/docker/daemon.json | grep /usr/bin/runsc
 ```
 
 ## List running workloads
