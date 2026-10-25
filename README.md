@@ -255,6 +255,50 @@ sudo docker info --format 'Runtimes: {{json .Runtimes}}'
 The runtime version tells you which gVisor release is installed. <br/>
 The platform option tells you how gVisor implements its sandbox on the host.
 
+## Running Kubernetes on the Pi5
+
+I'm going to add **[containerd](https://gvisor.dev/docs/user_guide/containerd/quick_start/)** + **the gVisor containerd shim**, then let Kubernetes use ```containerd``` as its CRI runtime. <br/>
+Kubernetes expects a CRI-compatible runtime, while Docker requires the extra ```cri-dockerd``` adapter. <br/>
+gVisor explicitly supports ```ARM64``` and ```Linux 5.6+```, so my Pi & kernel combination is actually a very good fit.
+
+| Component | MyPi5 | Kubernetes/gVisor |
+| :-------- | :---- | :---------------- |
+| CPU | ARM64 / Pi 5 | ✅ gVisor supports ARM64 |
+| Kernel | 6.18.50 | ✅ comfortably meets gVisor's 5.6+ requirement |
+| RAM | 8 GB | ✅ quite reasonable for a single-node lab |
+| Storage | 29 GB, ~20 GB free | ⚠️ workable, but I'd eventually add bigger MicroSD |
+| cgroup v2 | likely | ✅ preferred |
+| Docker | ```29.9.2``` | Not ideal as Kubernetes runtime |
+| gVisor | runsc 20261019 | ✅ excellent starting point |
+| gVisor Docker runtime | **working** | proves ```runsc``` itself works |
+| containerd | bundled with Docker, but not necessarily configured for CRI | main piece to add |
+
+I should be aiming for this design:
+```
+Kubernetes
+      │
+    CRI
+      │
+ containerd
+   │       │
+ runc    runsc
+          │
+       gVisor
+```
+As this is much more preferable to the below (original) implementation with Docker alone:
+```
+Kubernetes
+    │
+cri-dockerd
+    │
+ Docker
+    │
+  runsc
+```
+I am trying to avoid adding an unnecessary compatibility layer with Docker. <br/>
+Kubernetes removed its old direct Docker integration. Docker now needs ```cri-dockerd``` to satisfy CRI.<br/>
+```containerd``` is clearly the cleaner route.
+
 <br/><br/>
 Instant shutdown of my Raspberry Pi sitting at home
 ```
