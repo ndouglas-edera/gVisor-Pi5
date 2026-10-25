@@ -116,13 +116,12 @@ While that shell is open, use a **second SSH session** to run ```sudo docker ps`
 These checks demonstrate that the container is running under gVisor and has a separate process view. <br/>
 They are useful sanity checks, not a complete proof that every security boundary is unbreakable.
 <br/><br/>
-Comparing the host and container kernels
+Comparing the ```host``` kernel
 ```
-echo "=== Host kernel ==="
 uname -r
 ```
+and the ```container``` kernel reported by gVisor:
 ```
-echo "=== Container kernel as reported by gVisor ==="
 sudo docker run --rm --runtime=runsc ubuntu:24.04 uname -r
 ```
 
@@ -133,18 +132,15 @@ You should see different results:
 The container sees gVisor’s implemented Linux-compatible kernel interface rather than simply reporting the host kernel version.
 
 ### Compare process views
-On the host:
+On the host, check the process count:
 ```
-echo "=== Host process count ==="
 ps -e --no-headers | wc -l
 ```
 
-Inside a fresh gVisor container:
+Inside a fresh gVisor container, check ```PID 1``` and the container process list:
 ```
 sudo docker run --rm --runtime=runsc ubuntu:24.04 sh -c '
-  echo "=== Container PID 1 ==="
   cat /proc/1/comm
-  echo "=== Container process list ==="
   ps -ef
 '
 ```
@@ -216,49 +212,32 @@ These commands demonstrate the config and some isolation properties. They are no
 My expected key values are ```Debian 13```, ```aarch64```, and a page size of ```4096``` bytes.<br/> 
 I keep the page size for compatibility with my current gVisor build, as it used to cause issues.
 ```
-echo "=== Operating system ==="
 cat /etc/os-release
-
-echo
-echo "=== Kernel ==="
 uname -a
-
-echo
-echo "=== Architecture ==="
 uname -m
-
-echo
-echo "=== Memory ==="
 free -h
-
-echo
-echo "=== Disk space ==="
 df -h /
-
-echo
-echo "=== Kernel page size ==="
 getconf PAGE_SIZE
 ```
 
-Docker and gVisor versions:
+Docker version:
 ```
-echo "=== Docker version ==="
 sudo docker version
-
-echo
-echo "=== gVisor version ==="
+```
+gVisor version:
+```
 sudo runsc --version
-
-echo
-echo "=== Registered Docker runtimes ==="
+```
+Registered Docker runtimes
+```
 sudo docker info --format '{{json .Runtimes}}' | python3 -m json.tool
-
-echo
-echo "=== Docker service ==="
+```
+Docker service status check:
+```
 sudo systemctl is-active docker
-
-echo
-echo "=== Tailscale service ==="
+```
+Check the status of Tailscale:
+```
 sudo systemctl is-active tailscaled
 ```
 
