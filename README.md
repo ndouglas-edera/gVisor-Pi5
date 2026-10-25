@@ -308,7 +308,7 @@ chmod +x k8s-gvisor-check.sh
 
 Run the script:
 ```
-./k8s-gvisor-check.sh
+sudo ./k8s-gvisor-check.sh
 ```
 
 <br/><br/>
