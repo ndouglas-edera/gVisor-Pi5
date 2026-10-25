@@ -10,12 +10,6 @@
 #
 # Usage:
 #   sudo ./k8s-gvisor-check.sh
-#   ./k8s-gvisor-check.sh --help
-#
-# Optional environment:
-#   DIAG_LOG=/path/to/report.txt ./k8s-gvisor-check.sh
-#   SKIP_DOCKER_SMOKE=1 ./k8s-gvisor-check.sh
-
 set -uo pipefail
 export LC_ALL=C
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
@@ -327,6 +321,30 @@ else
   fail "containerd executable not found."
 fi
 show_file_if_present /etc/containerd/config.toml 120
+
+# Additional targeted CRI troubleshooting commands requested after review.
+# These are read-only and intentionally supplement—not replace—the checks above.
+section "5A. TARGETED CONTAINERD / CRI FOLLOW-UP COMMANDS"
+emit "Command: sudo ctr plugins ls | grep -i cri"
+if have ctr; then
+  as_root ctr plugins ls 2>&1 | grep -i cri | sed 's/^/  /' || true
+else
+  note "ctr is not installed; cannot run the plugin-list follow-up command."
+fi
+
+emit "Command: sudo grep -n 'disabled_plugins' /etc/containerd/config.toml"
+if [[ -f /etc/containerd/config.toml ]]; then
+  as_root grep -n 'disabled_plugins' /etc/containerd/config.toml 2>&1 | sed 's/^/  /' || true
+else
+  note "/etc/containerd/config.toml is not present; cannot run the disabled_plugins follow-up command."
+fi
+
+emit "Command: sudo systemctl status containerd --no-pager"
+if have systemctl; then
+  as_root systemctl status containerd --no-pager 2>&1 | sed 's/^/  /' || true
+else
+  note "systemctl is not available; cannot run the containerd status follow-up command."
+fi
 
 section "6. GVISOR RUNTIME"
 RUNSC_PATH=$(command -v runsc 2>/dev/null || true)
