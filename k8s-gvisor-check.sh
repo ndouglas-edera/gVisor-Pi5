@@ -1,801 +1,614 @@
 #!/usr/bin/env bash
-#
 # k8s-gvisor-check.sh
-# Read-only pre-flight checks for:
-#   - Raspberry Pi 5 / ARM64
-#   - Debian / Linux
-#   - Kubernetes
-#   - containerd
-#   - gVisor
-#   - Kubernetes networking / CNI prerequisites
-# This script DOES NOT modify the system.
-# It is safe to run repeatedly.
+# Read-only readiness and troubleshooting diagnostics for Kubernetes + gVisor
+# on Raspberry Pi / Debian-family Linux.
+#
+# It does not install packages, edit configuration, load modules, change
+# sysctls, restart services, or alter the cluster. Some checks use sudo when
+# available; the script will still run without it, but some results may be
+# incomplete.
+#
+# Usage:
+#   sudo ./k8s-gvisor-check.sh
+#   ./k8s-gvisor-check.sh --help
+#
+# Optional environment:
+#   DIAG_LOG=/path/to/report.txt ./k8s-gvisor-check.sh
+#   SKIP_DOCKER_SMOKE=1 ./k8s-gvisor-check.sh
 
-set -u
+set -uo pipefail
+export LC_ALL=C
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
+VERSION="2.0.0"
 PASS=0
 WARN=0
 FAIL=0
+INFO=0
+REPORT=""
+TMP_DIR=""
 
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-RESET='\033[0m'
+usage() {
+  cat <<'EOF'
+k8s-gvisor-check.sh — read-only Kubernetes + gVisor diagnostics
 
-pass() {
-    echo -e "  ${GREEN}[PASS]${RESET} $1"
-    PASS=$((PASS + 1))
+Options:
+  -h, --help       Show this help and exit
+
+Environment variables:
+  DIAG_LOG=PATH    Also write output to PATH (parent directory must exist)
+  SKIP_DOCKER_SMOKE=1
+                   Skip the Docker-to-gVisor smoke test
+
+Run as your normal user for permission diagnostics, or with sudo for more
+complete service/configuration inspection. No system changes are made.
+EOF
 }
 
-warn() {
-    echo -e "  ${YELLOW}[WARN]${RESET} $1"
-    WARN=$((WARN + 1))
-}
-
-fail() {
-    echo -e "  ${RED}[FAIL]${RESET} $1"
-    FAIL=$((FAIL + 1))
-}
-
-info() {
-    echo -e "  ${BLUE}[INFO]${RESET} $1"
-}
-
-section() {
-    echo
-    echo "============================================================"
-    echo "$1"
-    echo "============================================================"
-}
-
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# -------------------------------------------------------------------
-# Header
-# -------------------------------------------------------------------
-
-clear 2>/dev/null || true
-
-echo "============================================================"
-echo " Kubernetes + gVisor Compatibility Check"
-echo " Raspberry Pi / Linux"
-echo "============================================================"
-echo
-echo "This script performs READ-ONLY compatibility checks."
-echo
-echo "It will NOT:"
-echo "  - install Kubernetes"
-echo "  - modify Docker"
-echo "  - modify containerd"
-echo "  - modify gVisor"
-echo "  - load kernel modules"
-echo "  - change sysctl settings"
-echo "  - change firewall rules"
-echo "  - modify networking"
-echo
-
-# -------------------------------------------------------------------
-# Privilege check
-# -------------------------------------------------------------------
-
-section "PRIVILEGES"
-
-if [[ $EUID -eq 0 ]]; then
-    pass "Running as root"
-else
-    info "Running as user: $(id -un)"
-
-    if command_exists sudo && sudo -n true 2>/dev/null; then
-        pass "sudo is available without prompting"
-    elif command_exists sudo; then
-        info "sudo is available; privileged checks may prompt for your password"
-    else
-        warn "sudo is not available; some checks may be incomplete"
-    fi
-fi
-
-# -------------------------------------------------------------------
-# System
-# -------------------------------------------------------------------
-
-section "SYSTEM"
-
-OS_NAME="unknown"
-OS_VERSION="unknown"
-
-if [[ -f /etc/os-release ]]; then
-    . /etc/os-release
-    OS_NAME="${PRETTY_NAME:-unknown}"
-    OS_VERSION="${VERSION_ID:-unknown}"
-fi
-
-info "Hostname: $(hostname)"
-info "OS: $OS_NAME"
-info "Kernel: $(uname -r)"
-info "Architecture: $(uname -m)"
-info "CPU cores: $(nproc)"
-
-echo
-info "Memory:"
-free -h | sed 's/^/    /'
-
-if [[ "$(uname -m)" == "aarch64" ]]; then
-    pass "System architecture is ARM64 (aarch64)"
-else
-    warn "System architecture is $(uname -m); ARM64 was expected"
-fi
-
-KERNEL_MAJOR=$(uname -r | cut -d. -f1)
-KERNEL_MINOR=$(uname -r | cut -d. -f2)
-
-if [[ "$KERNEL_MAJOR" -gt 5 ]] ||
-   [[ "$KERNEL_MAJOR" -eq 5 && "$KERNEL_MINOR" -ge 6 ]]; then
-    pass "Kernel $(uname -r) is new enough for gVisor"
-else
-    fail "Kernel $(uname -r) may be too old for the intended gVisor setup"
-fi
-
-# -------------------------------------------------------------------
-# Raspberry Pi detection
-# -------------------------------------------------------------------
-
-section "HARDWARE"
-
-if [[ -f /proc/device-tree/model ]]; then
-    PI_MODEL=$(tr -d '\0' < /proc/device-tree/model)
-
-    info "Device: $PI_MODEL"
-
-    if echo "$PI_MODEL" | grep -qi "Raspberry Pi 5"; then
-        pass "Raspberry Pi 5 detected"
-    else
-        info "Device is not identified as a Raspberry Pi 5"
-    fi
-else
-    info "Raspberry Pi device-tree model unavailable"
-fi
-
-# -------------------------------------------------------------------
-# cgroups
-# -------------------------------------------------------------------
-
-section "CGROUPS"
-
-CGROUP_FS=$(stat -fc %T /sys/fs/cgroup 2>/dev/null || true)
-
-info "cgroup filesystem: ${CGROUP_FS:-unknown}"
-
-if [[ "$CGROUP_FS" == "cgroup2fs" ]]; then
-    pass "cgroup v2 detected"
-elif [[ "$CGROUP_FS" == "tmpfs" ]]; then
-    warn "Could not positively identify cgroup v2"
-else
-    warn "Unexpected cgroup filesystem: ${CGROUP_FS:-unknown}"
-fi
-
-if mount | grep -q 'type cgroup2'; then
-    pass "cgroup2 is mounted"
-else
-    warn "Could not find a cgroup2 mount"
-fi
-
-echo
-info "cgroup mounts:"
-mount | grep cgroup | sed 's/^/    /' || true
-
-# Check systemd cgroup hierarchy where possible
-if command_exists systemd-detect-virt; then
-    info "Virtualization: $(systemd-detect-virt 2>/dev/null || echo none)"
-fi
-
-# -------------------------------------------------------------------
-# containerd
-# -------------------------------------------------------------------
-
-section "CONTAINERD"
-
-if command_exists containerd; then
-    pass "containerd executable found"
-    info "Version: $(containerd --version)"
-else
-    fail "containerd executable not found"
-fi
-
-if systemctl list-unit-files containerd.service >/dev/null 2>&1; then
-    if systemctl is-active --quiet containerd; then
-        pass "containerd service is running"
-    else
-        warn "containerd service exists but is not currently running"
-    fi
-
-    echo
-    info "containerd service status:"
-    systemctl status containerd --no-pager --lines=5 2>/dev/null |
-        sed 's/^/    /' || true
-else
-    warn "containerd systemd service was not found"
-fi
-
-# Check containerd socket
-if [[ -S /run/containerd/containerd.sock ]]; then
-    pass "containerd socket exists: /run/containerd/containerd.sock"
-else
-    warn "containerd socket not found at /run/containerd/containerd.sock"
-fi
-
-# -------------------------------------------------------------------
-# Docker
-# -------------------------------------------------------------------
-
-section "DOCKER"
-
-DOCKER_AVAILABLE=false
-
-if command_exists docker; then
-    pass "Docker executable found"
-    DOCKER_AVAILABLE=true
-
-    # Query Docker through sudo because the current user may not
-    # belong to the docker group.
-    DOCKER_VERSION_OUTPUT=$(sudo docker version --format '{{.Server.Version}}' 2>&1 || true)
-
-    if [[ "$DOCKER_VERSION_OUTPUT" =~ ^[0-9] ]]; then
-        pass "Docker daemon is reachable"
-        info "Docker Engine: $DOCKER_VERSION_OUTPUT"
-    else
-        warn "Docker executable exists, but Docker daemon could not be queried"
-        info "This is commonly caused by the current user lacking access to /var/run/docker.sock"
-    fi
-else
-    info "Docker executable not found"
-fi
-
-if [[ -f /etc/docker/daemon.json ]]; then
-    pass "/etc/docker/daemon.json exists"
-
-    echo
-    info "Docker runtime configuration:"
-    sudo cat /etc/docker/daemon.json 2>/dev/null |
-        sed 's/^/    /' || warn "Could not read /etc/docker/daemon.json"
-else
-    info "/etc/docker/daemon.json does not exist"
-fi
-
-# -------------------------------------------------------------------
-# gVisor
-# -------------------------------------------------------------------
-
-section "GVISOR"
-
-if command_exists runsc; then
-    pass "runsc executable found"
-
-    RUNSC_VERSION=$(sudo runsc --version 2>/dev/null || true)
-
-    if [[ -n "$RUNSC_VERSION" ]]; then
-        echo "$RUNSC_VERSION" | sed 's/^/  [INFO] /'
-    else
-        warn "runsc exists but version could not be queried"
-    fi
-else
-    fail "runsc executable not found"
-fi
-
-if command_exists containerd-shim-runsc-v1; then
-    pass "containerd-shim-runsc-v1 found"
-    info "Path: $(command -v containerd-shim-runsc-v1)"
-else
-    fail "containerd-shim-runsc-v1 not found"
-    info "This is required for Kubernetes → containerd → gVisor integration"
-fi
-
-# Docker → gVisor smoke test
-if [[ "$DOCKER_AVAILABLE" == true ]] && command_exists runsc; then
-    echo
-    info "Testing Docker → gVisor runtime..."
-
-    GVISOR_TEST_OUTPUT=$(
-        sudo docker run --rm --runtime=runsc ubuntu:24.04 uname -r 2>&1
-    ) || true
-
-    if echo "$GVISOR_TEST_OUTPUT" | grep -q "gvisor"; then
-        pass "Docker can successfully launch a gVisor container"
-        info "Container kernel: $(echo "$GVISOR_TEST_OUTPUT" | tail -n1)"
-    else
-        warn "Docker → gVisor test did not report a gVisor kernel"
-        info "Output:"
-        echo "$GVISOR_TEST_OUTPUT" | sed 's/^/    /'
-    fi
-fi
-
-# -------------------------------------------------------------------
-# Kernel / boot parameters
-# -------------------------------------------------------------------
-
-section "KERNEL / BOOT PARAMETERS"
-
-info "Kernel command line:"
-echo "    $(cat /proc/cmdline)"
-
-# cgroup memory configuration
-CMDLINE=$(cat /proc/cmdline)
-
-if echo "$CMDLINE" | grep -qw 'cgroup_enable=memory'; then
-    pass "cgroup_enable=memory present in kernel command line"
-else
-    info "cgroup_enable=memory not explicitly present in kernel command line"
-fi
-
-if echo "$CMDLINE" | grep -qw 'cgroup_memory=1'; then
-    pass "cgroup_memory=1 present in kernel command line"
-else
-    info "cgroup_memory=1 not explicitly present in kernel command line"
-fi
-
-# -------------------------------------------------------------------
-# Kernel modules
-# -------------------------------------------------------------------
-
-section "KERNEL MODULES"
-
-if lsmod | grep -q '^overlay'; then
-    pass "overlay kernel module loaded"
-else
-    warn "overlay kernel module is not currently loaded"
-fi
-
-if lsmod | grep -q '^br_netfilter'; then
-    pass "br_netfilter kernel module loaded"
-else
-    warn "br_netfilter kernel module is not currently loaded"
-fi
-
-echo
-info "Relevant loaded modules:"
-lsmod | grep -E '^(overlay|br_netfilter|nf_|bridge)' |
-    sed 's/^/    /' || info "No matching modules currently loaded"
-
-echo
-info "Checking br_netfilter availability:"
-
-if command_exists modinfo; then
-    if modinfo br_netfilter >/dev/null 2>&1; then
-        pass "br_netfilter kernel module is available"
-    else
-        warn "br_netfilter kernel module is not available"
-    fi
-else
-    info "modinfo is unavailable"
-fi
-
-# -------------------------------------------------------------------
-# Network interfaces
-# -------------------------------------------------------------------
-
-section "NETWORK INTERFACES"
-
-if command_exists ip; then
-    info "Interfaces:"
-    ip -br addr | sed 's/^/    /'
-
-    echo
-    info "Routes:"
-    ip route | sed 's/^/    /'
-else
-    fail "ip command not found"
-fi
-
-# -------------------------------------------------------------------
-# Kubernetes networking prerequisites
-# -------------------------------------------------------------------
-
-section "KUBERNETES NETWORKING PREREQUISITES"
-
-IP_FORWARD=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo "unknown")
-
-if [[ "$IP_FORWARD" == "1" ]]; then
-    pass "IPv4 forwarding enabled"
-elif [[ "$IP_FORWARD" == "0" ]]; then
-    warn "IPv4 forwarding is disabled"
-else
-    warn "Could not determine IPv4 forwarding state"
-fi
-
-BRIDGE_IPTABLES=$(sysctl -n net.bridge.bridge-nf-call-iptables 2>/dev/null || echo "missing")
-
-if [[ "$BRIDGE_IPTABLES" == "1" ]]; then
-    pass "bridge-nf-call-iptables enabled"
-elif [[ "$BRIDGE_IPTABLES" == "0" ]]; then
-    warn "bridge-nf-call-iptables is disabled"
-else
-    info "bridge-nf-call-iptables is unavailable/not configured"
-fi
-
-BRIDGE_IP6TABLES=$(sysctl -n net.bridge.bridge-nf-call-ip6tables 2>/dev/null || echo "missing")
-
-if [[ "$BRIDGE_IP6TABLES" == "1" ]]; then
-    pass "bridge-nf-call-ip6tables enabled"
-elif [[ "$BRIDGE_IP6TABLES" == "0" ]]; then
-    warn "bridge-nf-call-ip6tables is disabled"
-else
-    info "bridge-nf-call-ip6tables is unavailable/not configured"
-fi
-
-# Print all relevant networking sysctls
-echo
-info "Relevant networking sysctls:"
-
-sysctl -a 2>/dev/null |
-    grep -E '(^net\.ipv4\.ip_forward|^net\.ipv6\.conf.*forwarding|^net\.bridge\.bridge-nf)' |
-    sed 's/^/    /' || true
-
-# -------------------------------------------------------------------
-# nftables
-# -------------------------------------------------------------------
-
-section "NFTABLES"
-
-if command_exists nft; then
-    pass "nft command found"
-
-    echo
-    info "nftables ruleset:"
-    sudo nft list ruleset 2>/dev/null |
-        sed 's/^/    /' || warn "Could not read nftables ruleset"
-else
-    warn "nft command not found"
-fi
-
-# -------------------------------------------------------------------
-# iptables
-# -------------------------------------------------------------------
-
-section "IPTABLES"
-
-if command_exists iptables; then
-    pass "iptables command found"
-
-    info "iptables version:"
-    iptables --version 2>&1 | sed 's/^/    /'
-
-    echo
-    info "iptables rules:"
-    sudo iptables -L -n -v 2>/dev/null |
-        sed 's/^/    /' || warn "Could not read iptables rules"
-else
-    warn "iptables command not found"
-fi
-
-if command_exists ip6tables; then
-    pass "ip6tables command found"
-
-    info "ip6tables version:"
-    ip6tables --version 2>&1 | sed 's/^/    /'
-else
-    info "ip6tables command not found"
-fi
-
-# -------------------------------------------------------------------
-# iptables backend
-# -------------------------------------------------------------------
-
-section "IPTABLES BACKEND"
-
-if command_exists update-alternatives; then
-    IPTABLES_ALTERNATIVE=$(
-        update-alternatives --query iptables 2>/dev/null |
-        grep '^Value:' |
-        head -n1 |
-        cut -d' ' -f2-
-    )
-
-    if [[ -n "$IPTABLES_ALTERNATIVE" ]]; then
-        info "iptables implementation: $IPTABLES_ALTERNATIVE"
-
-        if echo "$IPTABLES_ALTERNATIVE" | grep -q nft; then
-            pass "iptables is using the nftables backend"
-        elif echo "$IPTABLES_ALTERNATIVE" | grep -q legacy; then
-            warn "iptables is using the legacy backend"
-        fi
-    else
-        info "Could not determine iptables backend"
-    fi
-else
-    info "update-alternatives unavailable"
-fi
-
-# -------------------------------------------------------------------
-# Bridge networking
-# -------------------------------------------------------------------
-
-section "BRIDGE NETWORKING"
-
-if command_exists bridge; then
-    info "Current Linux bridges:"
-    bridge link show 2>/dev/null | sed 's/^/    /' || true
-
-    echo
-    info "Bridge VLAN information:"
-    bridge vlan show 2>/dev/null | sed 's/^/    /' || true
-else
-    info "bridge command unavailable"
-fi
-
-# -------------------------------------------------------------------
-# DNS
-# -------------------------------------------------------------------
-
-section "DNS"
-
-if command_exists resolvectl; then
-    info "resolvectl status:"
-    resolvectl status 2>/dev/null |
-        sed -n '1,80p' |
-        sed 's/^/    /' || true
-elif [[ -f /etc/resolv.conf ]]; then
-    info "/etc/resolv.conf:"
-    cat /etc/resolv.conf | sed 's/^/    /'
-else
-    warn "Could not determine DNS configuration"
-fi
-
-# -------------------------------------------------------------------
-# Storage
-# -------------------------------------------------------------------
-
-section "STORAGE"
-
-ROOT_AVAIL_KB=$(df -Pk / | awk 'NR==2 {print $4}')
-ROOT_AVAIL_GB=$((ROOT_AVAIL_KB / 1024 / 1024))
-
-info "Root filesystem:"
-df -h / | sed 's/^/    /'
-
-echo
-info "Block devices:"
-lsblk | sed 's/^/    /'
-
-if [[ "$ROOT_AVAIL_GB" -ge 20 ]]; then
-    pass "At least 20 GiB available on root filesystem (${ROOT_AVAIL_GB} GiB)"
-elif [[ "$ROOT_AVAIL_GB" -ge 10 ]]; then
-    warn "Only ${ROOT_AVAIL_GB} GiB available; enough for experimentation, but storage is getting tight"
-else
-    fail "Less than 10 GiB available on root filesystem (${ROOT_AVAIL_GB} GiB)"
-fi
-
-# Detect microSD root device
-ROOT_DEVICE=$(findmnt -n -o SOURCE / 2>/dev/null || true)
-
-if echo "$ROOT_DEVICE" | grep -q 'mmcblk'; then
-    warn "Root filesystem is on microSD storage ($ROOT_DEVICE)"
-    info "Suitable for initial experimentation, but SSD/NVMe is recommended for sustained Kubernetes workloads"
-fi
-
-# -------------------------------------------------------------------
-# Memory
-# -------------------------------------------------------------------
-
-section "MEMORY"
-
-TOTAL_MEM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
-TOTAL_MEM_GB=$((TOTAL_MEM_KB / 1024 / 1024))
-
-if [[ "$TOTAL_MEM_GB" -ge 4 ]]; then
-    pass "At least 4 GiB RAM available (${TOTAL_MEM_GB} GiB detected)"
-else
-    warn "Only ${TOTAL_MEM_GB} GiB RAM detected; Kubernetes will be constrained"
-fi
-
-# -------------------------------------------------------------------
-# Swap
-# -------------------------------------------------------------------
-
-section "SWAP"
-
-SWAP_TOTAL=$(free -h | awk '/^Swap:/ {print $2}')
-SWAP_USED=$(free -h | awk '/^Swap:/ {print $3}')
-
-info "Swap total: $SWAP_TOTAL"
-info "Swap used:  $SWAP_USED"
-
-if swapon --show --noheadings 2>/dev/null | grep -q .; then
-    pass "Swap is configured"
-
-    echo
-    info "Active swap:"
-    swapon --show | sed 's/^/    /'
-else
-    info "No active swap detected"
-fi
-
-# -------------------------------------------------------------------
-# Kubernetes tools
-# -------------------------------------------------------------------
-
-section "KUBERNETES TOOLS"
-
-if command_exists kubeadm; then
-    pass "kubeadm is installed"
-    kubeadm version -o short 2>/dev/null |
-        sed 's/^/  [INFO] kubeadm: /' || true
-else
-    info "kubeadm is not installed yet"
-fi
-
-if command_exists kubelet; then
-    pass "kubelet is installed"
-    kubelet --version 2>/dev/null |
-        sed 's/^/  [INFO] kubelet: /' || true
-else
-    info "kubelet is not installed yet"
-fi
-
-if command_exists kubectl; then
-    pass "kubectl is installed"
-    kubectl version --client --output=yaml 2>/dev/null |
-        grep -E 'gitVersion:' |
-        sed 's/^/  [INFO] /' || true
-else
-    info "kubectl is not installed yet"
-fi
-
-# -------------------------------------------------------------------
-# Relevant ports
-# -------------------------------------------------------------------
-
-section "KUBERNETES PORTS"
-
-if command_exists ss; then
-    info "Currently listening TCP ports:"
-    sudo ss -lntp 2>/dev/null | sed 's/^/    /' || true
-
-    echo
-    info "Currently listening UDP ports:"
-    sudo ss -lnup 2>/dev/null | sed 's/^/    /' || true
-else
-    info "ss command unavailable"
-fi
-
-# -------------------------------------------------------------------
-# Container runtime sockets/processes
-# -------------------------------------------------------------------
-
-section "CONTAINER RUNTIME PROCESSES"
-
-info "Relevant processes:"
-ps aux |
-    grep -E 'containerd|dockerd|runsc|containerd-shim' |
-    grep -v grep |
-    sed 's/^/    /' || true
-
-# -------------------------------------------------------------------
-# Containerd configuration
-# -------------------------------------------------------------------
-
-section "CONTAINERD CONFIGURATION"
-
-if [[ -f /etc/containerd/config.toml ]]; then
-    pass "/etc/containerd/config.toml exists"
-
-    echo
-    info "Relevant containerd runtime configuration:"
-
-    grep -nE \
-        'version|SystemdCgroup|runtime_type|runtime_path|runsc|shim|runc' \
-        /etc/containerd/config.toml 2>/dev/null |
-        sed 's/^/    /' || true
-else
-    info "/etc/containerd/config.toml does not exist"
-fi
-
-# -------------------------------------------------------------------
-# gVisor/containerd integration
-# -------------------------------------------------------------------
-
-section "GVISOR CONTAINERD INTEGRATION"
-
-if command_exists containerd-shim-runsc-v1; then
-    SHIM_PATH=$(command -v containerd-shim-runsc-v1)
-
-    info "gVisor containerd shim: $SHIM_PATH"
-
-    if [[ -x "$SHIM_PATH" ]]; then
-        pass "gVisor containerd shim is executable"
-    else
-        warn "gVisor containerd shim exists but is not executable"
-    fi
-fi
-
-# Check common binary locations
-for path in \
-    /usr/bin/runsc \
-    /usr/local/bin/runsc \
-    /usr/bin/containerd-shim-runsc-v1 \
-    /usr/local/bin/containerd-shim-runsc-v1
-do
-    if [[ -e "$path" ]]; then
-        info "Found: $path"
-    fi
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    *) printf 'Unknown option: %s\n' "$arg" >&2; usage >&2; exit 2 ;;
+  esac
 done
 
-# -------------------------------------------------------------------
-# Overall assessment
-# -------------------------------------------------------------------
-
-section "RESULT"
-
-echo
-echo "  PASS: $PASS"
-echo "  WARN: $WARN"
-echo "  FAIL: $FAIL"
-echo
-
-if [[ "$FAIL" -eq 0 && "$WARN" -eq 0 ]]; then
-
-    echo -e "${GREEN}RESULT: READY${RESET}"
-    echo
-    echo "The environment looks good for Kubernetes + gVisor deployment."
-    echo "No compatibility blockers were detected."
-
-elif [[ "$FAIL" -eq 0 ]]; then
-
-    echo -e "${YELLOW}RESULT: READY WITH WARNINGS${RESET}"
-    echo
-    echo "No hard compatibility blockers were detected."
-    echo
-    echo "Review the warnings above, particularly:"
-    echo "  - br_netfilter"
-    echo "  - bridge-nf-* sysctls"
-    echo "  - storage capacity"
-    echo "  - networking/firewall configuration"
-    echo
-    echo "These do not automatically prevent Kubernetes deployment."
-
-elif [[ "$FAIL" -le 2 ]]; then
-
-    echo -e "${YELLOW}RESULT: NOT YET READY${RESET}"
-    echo
-    echo "A small number of prerequisites are missing."
-    echo "Resolve the FAIL items before deploying Kubernetes."
-
-else
-
-    echo -e "${RED}RESULT: NOT READY${RESET}"
-    echo
-    echo "Multiple compatibility blockers were detected."
-    echo "Resolve the FAIL items before deploying Kubernetes."
-
+if [[ -n "${DIAG_LOG:-}" ]]; then
+  if ! : >"$DIAG_LOG" 2>/dev/null; then
+    printf 'Cannot write DIAG_LOG=%s\n' "$DIAG_LOG" >&2
+    exit 2
+  fi
+  REPORT="$DIAG_LOG"
 fi
 
-echo
-echo "============================================================"
-echo " Deployment guidance"
-echo "============================================================"
-echo
+cleanup() {
+  [[ -n "$TMP_DIR" && -d "$TMP_DIR" ]] && rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
 
-if [[ "$FAIL" -eq 0 ]]; then
-    echo "Recommended next step:"
-    echo
-    echo "  1. Review the networking diagnostics above."
-    echo "  2. Configure Kubernetes to use containerd."
-    echo "  3. Configure containerd with both runc and runsc."
-    echo "  4. Register a Kubernetes RuntimeClass named 'gvisor'."
-    echo "  5. Test a normal pod."
-    echo "  6. Test a gVisor pod and verify:"
-    echo
-    echo "       kubectl exec <pod> -- uname -r"
-    echo
-    echo "     Expected gVisor result:"
-    echo "       4.19.0-gvisor"
+emit() {
+  printf '%s\n' "$*"
+  if [[ -n "$REPORT" ]]; then printf '%s\n' "$*" >>"$REPORT"; fi
+}
+
+section() { emit ""; emit "================================================================"; emit "$*"; emit "================================================================"; }
+note() { emit "  INFO: $*"; INFO=$((INFO + 1)); }
+pass() { emit "  PASS: $*"; PASS=$((PASS + 1)); }
+warn() { emit "  WARN: $*"; WARN=$((WARN + 1)); }
+fail() { emit "  FAIL: $*"; FAIL=$((FAIL + 1)); }
+detail() { emit "        $*"; }
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Prefer sudo for privileged read-only queries when available. If sudo requires
+# a password and cannot run non-interactively, fall back to the unprivileged
+# command and let the check report limited access.
+as_root() {
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    "$@"
+  elif have sudo && sudo -n true >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+capture() {
+  # capture COMMAND [ARGS...]; prints stdout/stderr, tolerates unavailable tools.
+  "$@" 2>&1 || true
+}
+
+is_active() {
+  have systemctl && systemctl is-active --quiet "$1"
+}
+
+read_sysctl() {
+  local key="$1" file="/proc/sys/${1//./\/}"
+  if [[ -r "$file" ]]; then
+    tr -d '\n' < "$file"
+  elif have sysctl; then
+    sysctl -n "$key" 2>/dev/null || printf 'unavailable'
+  else
+    printf 'unavailable'
+  fi
+}
+
+show_file_if_present() {
+  local f="$1" max_lines="${2:-100}"
+  if [[ -f "$f" ]]; then
+    detail "File: $f"
+    if [[ -r "$f" ]]; then
+      sed -n "1,${max_lines}p" "$f" | sed 's/^/        | /'
+      local lines
+      lines=$(wc -l <"$f" 2>/dev/null || echo 0)
+      if (( lines > max_lines )); then detail "... truncated after ${max_lines} lines"; fi
+    else
+      detail "Not readable as current user."
+    fi
+  fi
+}
+
+TMP_DIR=$(mktemp -d 2>/dev/null || true)
+
+section "KUBERNETES + GVISOR PI DIAGNOSTICS v${VERSION}"
+emit "Timestamp: $(date -Is 2>/dev/null || date)"
+emit "Hostname:  $(hostname 2>/dev/null || echo unknown)"
+emit "User:      $(id 2>/dev/null || echo unknown)"
+emit "Report:    ${REPORT:-stdout only}"
+emit "Scope:     read-only checks; no system changes"
+
+section "1. HARDWARE, OS AND KERNEL"
+ARCH=$(uname -m 2>/dev/null || echo unknown)
+KERNEL=$(uname -r 2>/dev/null || echo unknown)
+OS_PRETTY=""
+if [[ -r /etc/os-release ]]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  OS_PRETTY="${PRETTY_NAME:-unknown}"
+fi
+emit "OS:          ${OS_PRETTY:-unknown}"
+emit "Architecture: ${ARCH}"
+emit "Kernel:       ${KERNEL}"
+if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
+  pass "64-bit ARM userspace detected."
 else
-    echo "Do not proceed with Kubernetes installation until the FAIL"
-    echo "items above have been resolved."
+  warn "Architecture is '$ARCH'; verify compatibility of Kubernetes and gVisor packages."
 fi
 
-echo
-echo "============================================================"
-echo " End of compatibility check"
-echo "============================================================"
+if have tr; then
+  MODEL=""
+  for f in /proc/device-tree/model /sys/firmware/devicetree/base/model; do
+    if [[ -r "$f" ]]; then MODEL=$(tr -d '\000' <"$f"); break; fi
+  done
+  if [[ -n "$MODEL" ]]; then
+    emit "Device model: $MODEL"
+    if [[ "$MODEL" == *"Raspberry Pi 5"* ]]; then pass "Raspberry Pi 5 identified."; else note "Device-tree model is not Raspberry Pi 5; checks are still applicable to many Linux hosts."; fi
+  else
+    note "Device model not exposed via device tree (possibly a VM or restricted environment)."
+  fi
+fi
+
+if [[ -r /etc/debian_version ]]; then emit "Debian version: $(cat /etc/debian_version)"; fi
+if [[ -r /proc/cmdline ]]; then emit "Kernel cmdline: $(cat /proc/cmdline)"; fi
+if have lscpu; then
+  emit "CPU summary:"
+  lscpu 2>/dev/null | grep -E '^(Architecture|CPU\(s\)|On-line CPU|Model name|Vendor ID|Thread|Core|Socket|Flags):' | sed 's/^/  /' || true
+fi
+if have vcgencmd; then
+  emit "Firmware-reported throttling:"
+  vcgencmd get_throttled 2>&1 | sed 's/^/  /' || true
+fi
+
+section "2. MEMORY, SWAP AND STORAGE"
+if have free; then free -h | sed 's/^/  /'; fi
+if [[ -r /proc/swaps ]]; then
+  emit "Swap devices:"
+  sed -n '1,8p' /proc/swaps | sed 's/^/  /'
+  if [[ $(awk 'NR>1 {n++} END {print n+0}' /proc/swaps) -gt 0 ]]; then
+    warn "Swap is enabled. Kubernetes kubelet commonly requires swap to be disabled unless configured for swap support."
+  else
+    pass "No active swap devices reported."
+  fi
+fi
+emit "Filesystem capacity:"
+df -hPT / /var /var/lib/containerd /var/lib/kubelet 2>/dev/null | awk '!seen[$7]++' | sed 's/^/  /' || true
+ROOT_AVAIL_KB=$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4+0}')
+if [[ -n "$ROOT_AVAIL_KB" ]]; then
+  if (( ROOT_AVAIL_KB < 2*1024*1024 )); then
+    warn "Less than 2 GiB free on root filesystem; images and Kubernetes state may exhaust storage."
+  elif (( ROOT_AVAIL_KB < 5*1024*1024 )); then
+    warn "Less than 5 GiB free on root filesystem; monitor image and log growth."
+  else
+    pass "Root filesystem has at least 5 GiB free."
+  fi
+fi
+if have findmnt; then
+  emit "Relevant mounts:"
+  findmnt -T / -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | sed 's/^/  /' || true
+  findmnt -T /var/lib/containerd -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null | sed 's/^/  /' || true
+fi
+if [[ -d /sys/fs/cgroup ]]; then
+  emit "Cgroup filesystem:"
+  stat -fc '  filesystem type: %T' /sys/fs/cgroup 2>/dev/null || true
+  if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
+    pass "Unified cgroup v2 detected."
+    detail "Controllers: $(cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null)"
+  else
+    warn "cgroup v2 controller file not found; this may be a cgroup v1 or hybrid setup."
+  fi
+else
+  fail "/sys/fs/cgroup is missing."
+fi
+
+section "3. PACKAGE AND TOOL INVENTORY"
+for cmd in bash systemctl journalctl mount findmnt ip ss awk sed grep; do
+  if have "$cmd"; then pass "$cmd: $(command -v "$cmd")"; else warn "$cmd not found."; fi
+done
+for cmd in containerd ctr crictl nerdctl runsc containerd-shim-runsc-v1 docker kubelet kubeadm kubectl; do
+  if have "$cmd"; then
+    emit "$cmd: $(command -v "$cmd")"
+    case "$cmd" in
+      containerd|ctr|crictl|nerdctl|runsc|docker|kubelet|kubeadm|kubectl)
+        VER=$("$cmd" --version 2>&1 | head -n 1 || true)
+        [[ -n "$VER" ]] && detail "$VER"
+        ;;
+    esac
+  else
+    emit "$cmd: not found"
+  fi
+done
+
+section "4. SYSTEMD SERVICES"
+if have systemctl; then
+  for svc in containerd docker kubelet; do
+    if systemctl list-unit-files "${svc}.service" --no-legend 2>/dev/null | grep -q "${svc}\.service"; then
+      state=$(systemctl is-active "$svc" 2>/dev/null || true)
+      enabled=$(systemctl is-enabled "$svc" 2>/dev/null || true)
+      emit "$svc.service: active=${state:-unknown}, enabled=${enabled:-unknown}"
+      if [[ "$svc" == "containerd" ]]; then
+        if [[ "$state" == "active" ]]; then pass "containerd service is active."; else fail "containerd service is not active."; fi
+      elif [[ "$svc" == "docker" ]]; then
+        [[ "$state" == "active" ]] && pass "Docker service is active." || warn "Docker service is not active (not required if Kubernetes uses containerd directly)."
+      elif [[ "$svc" == "kubelet" ]]; then
+        [[ "$state" == "active" ]] && pass "kubelet service is active." || note "kubelet is not active; expected before Kubernetes installation or if the node is stopped."
+      fi
+      emit "Recent ${svc} journal (last 12 lines):"
+      as_root journalctl -u "$svc" -n 12 --no-pager 2>/dev/null | sed 's/^/  /' || true
+    else
+      note "$svc.service unit not found."
+    fi
+  done
+else
+  warn "systemctl not available; service status cannot be checked."
+fi
+
+section "5. CONTAINERD AND CRI CONFIGURATION"
+if have containerd; then
+  emit "containerd version:"
+  capture containerd --version | sed 's/^/  /'
+  if have systemctl && systemctl is-active --quiet containerd; then
+    pass "containerd is running."
+  else
+    warn "containerd may not be running; CRI checks can fail."
+  fi
+
+  emit "containerd config paths:"
+  for f in /etc/containerd/config.toml /etc/containerd/conf.d/*.toml; do
+    [[ -f "$f" ]] && emit "  $f"
+  done
+
+  if have containerd; then
+    CONFIG_DUMP=""
+    if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+      CONFIG_DUMP=$(containerd config dump 2>&1 || true)
+    elif have sudo && sudo -n true >/dev/null 2>&1; then
+      CONFIG_DUMP=$(sudo containerd config dump 2>&1 || true)
+    else
+      CONFIG_DUMP=$(containerd config dump 2>&1 || true)
+    fi
+    if [[ -n "$CONFIG_DUMP" && "$CONFIG_DUMP" != *"permission denied"* ]]; then
+      emit "Effective containerd configuration highlights (from 'containerd config dump'):"
+      printf '%s\n' "$CONFIG_DUMP" | grep -n -E -i '^(version|root|state|disabled_plugins|imports)|cri|runtime_type|runtime_path|runtime_engine|runsc|SystemdCgroup|sandbox_image|bin_dir|conf_dir|snapshotter|enable_selinux' | head -n 100 | sed 's/^/  /' || true
+      if printf '%s\n' "$CONFIG_DUMP" | grep -Eiq 'disabled_plugins[[:space:]]*=.*cri'; then
+        fail "The effective containerd config appears to disable the CRI plugin."
+      elif printf '%s\n' "$CONFIG_DUMP" | grep -Eiq 'io\.containerd\.(grpc\.)?v1\.cri'; then
+        pass "CRI-related configuration appears in containerd config dump; confirm plugin status below."
+      else
+        warn "No obvious CRI configuration markers found in config dump; inspect the full configuration."
+      fi
+      if printf '%s\n' "$CONFIG_DUMP" | grep -Eiq 'runsc'; then
+        pass "A gVisor/runsc reference appears in the effective containerd configuration."
+      else
+        warn "No runsc reference found in effective containerd config. Docker's runsc runtime is separate from containerd's CRI runtime configuration."
+      fi
+    else
+      warn "Could not read effective containerd configuration; try running the script with sudo."
+    fi
+  fi
+
+  if have ctr; then
+    emit "containerd plugins (CRI-related rows):"
+    as_root ctr plugins ls 2>&1 | grep -E -i 'TYPE|cri|runtime|snapshot' | head -n 35 | sed 's/^/  /' || true
+    if as_root ctr plugins ls 2>/dev/null | grep -Eiq 'io\.containerd\.(grpc\.)?v1\.cri.*ok|cri.*ok'; then
+      pass "containerd plugin listing reports a CRI plugin in an OK state."
+    else
+      warn "Could not confirm a healthy CRI plugin from 'ctr plugins ls'. Check the full plugin list and containerd logs."
+    fi
+  else
+    warn "'ctr' is missing; cannot inspect containerd plugins."
+  fi
+
+  if have crictl; then
+    emit "crictl runtime status:"
+    as_root crictl info 2>&1 | head -n 45 | sed 's/^/  /' || true
+  else
+    note "'crictl' not installed; optional CRI diagnostics are unavailable."
+  fi
+else
+  fail "containerd executable not found."
+fi
+show_file_if_present /etc/containerd/config.toml 120
+
+section "6. GVISOR RUNTIME"
+RUNSC_PATH=$(command -v runsc 2>/dev/null || true)
+SHIM_PATH=$(command -v containerd-shim-runsc-v1 2>/dev/null || true)
+if [[ -n "$RUNSC_PATH" ]]; then
+  pass "runsc found at $RUNSC_PATH"
+  runsc --version 2>&1 | head -n 5 | sed 's/^/  /' || true
+  emit "runsc spec/runtime details:"
+  runsc --help 2>&1 | head -n 2 | sed 's/^/  /' || true
+else
+  fail "runsc executable not found in PATH."
+fi
+if [[ -n "$SHIM_PATH" ]]; then
+  pass "containerd gVisor shim found at $SHIM_PATH"
+  ls -l "$SHIM_PATH" 2>/dev/null | sed 's/^/  /' || true
+else
+  warn "containerd-shim-runsc-v1 not found in PATH. Check the installed gVisor package and containerd runtime setup."
+fi
+if have runsc; then
+  emit "gVisor host compatibility/version check:"
+  runsc --version 2>&1 | sed 's/^/  /' || true
+fi
+
+section "7. DOCKER STATUS AND GVISOR SMOKE TEST"
+if have docker; then
+  emit "Docker client: $(docker --version 2>&1 | head -n 1)"
+  if docker info >/dev/null 2>&1; then
+    pass "Docker daemon is reachable as the current user."
+    docker info --format '  Server version: {{.ServerVersion}}; runtimes: {{json .Runtimes}}; default runtime: {{.DefaultRuntime}}' 2>&1 || true
+    if docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q runsc; then
+      pass "Docker reports a runsc runtime."
+    else
+      warn "Docker daemon is reachable, but its runtime list does not clearly include runsc."
+    fi
+    if [[ "${SKIP_DOCKER_SMOKE:-0}" != "1" ]]; then
+      emit "Attempting Docker -> gVisor smoke test (may need to pull ubuntu:24.04):"
+      SMOKE_OUT=$(docker run --rm --runtime=runsc ubuntu:24.04 uname -r 2>&1)
+      SMOKE_RC=$?
+      if [[ $SMOKE_RC -eq 0 ]]; then
+        emit "  Output: $SMOKE_OUT"
+        if [[ "$SMOKE_OUT" == *gvisor* || "$SMOKE_OUT" == *gVisor* ]]; then
+          pass "Docker successfully launched a container using gVisor."
+        else
+          warn "Container started, but kernel string did not clearly identify gVisor; inspect output and runtime configuration."
+        fi
+      else
+        warn "Docker -> gVisor smoke test failed (exit $SMOKE_RC)."
+        detail "$SMOKE_OUT"
+        detail "This test requires Docker daemon access and may need network access to pull the image."
+      fi
+    else
+      note "Docker smoke test skipped by SKIP_DOCKER_SMOKE=1."
+    fi
+  else
+    warn "Docker executable exists, but the daemon could not be queried as the current user."
+    detail "Try: sudo docker info"
+    detail "This may be a socket permission issue, stopped daemon, or unavailable Docker service."
+    if [[ "${SKIP_DOCKER_SMOKE:-0}" != "1" ]]; then
+      if have sudo && sudo -n docker info >/dev/null 2>&1; then
+        pass "Docker daemon is reachable with non-interactive sudo."
+        sudo docker info --format '  Server version: {{.ServerVersion}}; runtimes: {{json .Runtimes}}; default runtime: {{.DefaultRuntime}}' 2>&1 || true
+        emit "Attempting privileged Docker -> gVisor smoke test:"
+        SMOKE_OUT=$(sudo docker run --rm --runtime=runsc ubuntu:24.04 uname -r 2>&1)
+        SMOKE_RC=$?
+        if [[ $SMOKE_RC -eq 0 ]]; then
+          emit "  Output: $SMOKE_OUT"
+          pass "Docker successfully launched a container using gVisor (via sudo)."
+        else
+          warn "Privileged Docker -> gVisor smoke test failed (exit $SMOKE_RC)."
+          detail "$SMOKE_OUT"
+        fi
+      else
+        note "Not retrying Docker with sudo because passwordless sudo is unavailable; run 'sudo docker info' manually if desired."
+      fi
+    fi
+  fi
+  show_file_if_present /etc/docker/daemon.json 100
+else
+  note "Docker is not installed. Docker checks are optional when Kubernetes uses containerd directly."
+fi
+
+section "8. KERNEL MODULES AND SYSCTL NETWORK PREREQUISITES"
+for mod in overlay br_netfilter; do
+  if [[ -d "/sys/module/$mod" ]]; then
+    pass "Kernel module '$mod' is loaded."
+  elif have lsmod && lsmod | awk '{print $1}' | grep -qx "$mod"; then
+    pass "Kernel module '$mod' is loaded."
+  else
+    warn "Kernel module '$mod' does not appear loaded. Whether it is needed depends on the networking/CNI and kernel configuration."
+  fi
+done
+
+for key in net.ipv4.ip_forward net.bridge.bridge-nf-call-iptables net.bridge.bridge-nf-call-ip6tables net.ipv6.conf.all.forwarding; do
+  value=$(read_sysctl "$key")
+  emit "$key = $value"
+  case "$key" in
+    net.ipv4.ip_forward)
+      [[ "$value" == "1" ]] && pass "IPv4 forwarding is enabled." || warn "IPv4 forwarding is not enabled; most Kubernetes pod networking setups require it."
+      ;;
+    net.bridge.bridge-nf-call-iptables|net.bridge.bridge-nf-call-ip6tables)
+      if [[ "$value" == "1" ]]; then pass "$key is enabled."
+      elif [[ "$value" == "unavailable" ]]; then note "$key unavailable (often because br_netfilter is not loaded); requirements depend on CNI and iptables mode."
+      else warn "$key is not enabled; verify whether your chosen CNI requires bridge netfilter."
+      fi
+      ;;
+    net.ipv6.conf.all.forwarding)
+      [[ "$value" == "1" ]] && pass "IPv6 forwarding is enabled." || note "IPv6 forwarding is not enabled; only relevant if using IPv6 pod networking."
+      ;;
+  esac
+done
+
+if [[ -r /proc/cmdline ]]; then
+  CMDLINE=$(cat /proc/cmdline)
+  if [[ "$CMDLINE" == *cgroup_enable=memory* || -f /sys/fs/cgroup/cgroup.controllers ]]; then
+    pass "Kernel boot configuration/cgroup state suggests memory cgroups may be available."
+  else
+    warn "No cgroup_enable=memory token found and cgroup v2 controller status was not conclusive; verify memory cgroup support."
+  fi
+fi
+if [[ -r /sys/fs/cgroup/cgroup.controllers ]]; then
+  CONTROLLERS=$(cat /sys/fs/cgroup/cgroup.controllers)
+  for c in cpu cpuset memory pids; do
+    if grep -qw "$c" <<<"$CONTROLLERS"; then pass "cgroup v2 controller '$c' is available."; else warn "cgroup v2 controller '$c' not listed in root controllers."; fi
+  done
+fi
+
+section "9. NETWORK INTERFACES, ROUTES, DNS AND FIREWALL"
+if have ip; then
+  emit "Addresses:"
+  ip -brief address 2>&1 | sed 's/^/  /' || true
+  emit "Links:"
+  ip -brief link 2>&1 | sed 's/^/  /' || true
+  emit "Routes (IPv4):"
+  ip route show 2>&1 | head -n 30 | sed 's/^/  /' || true
+  emit "Routes (IPv6):"
+  ip -6 route show 2>&1 | head -n 20 | sed 's/^/  /' || true
+else
+  warn "'ip' command not found; interface and route diagnostics unavailable."
+fi
+if [[ -r /etc/resolv.conf ]]; then
+  emit "/etc/resolv.conf:"
+  sed -n '1,30p' /etc/resolv.conf | sed 's/^/  /'
+fi
+if have getent; then
+  emit "DNS lookup test for registry.k8s.io:"
+  getent ahosts registry.k8s.io 2>&1 | head -n 8 | sed 's/^/  /' || true
+else
+  note "'getent' unavailable; DNS lookup test skipped."
+fi
+
+if have nft; then
+  emit "nftables version:"
+  nft --version 2>&1 | sed 's/^/  /'
+  emit "nftables ruleset summary (first 80 lines; may require sudo):"
+  as_root nft list ruleset 2>&1 | head -n 80 | sed 's/^/  /' || true
+else
+  note "nft command not found."
+fi
+if have iptables; then
+  emit "iptables version/backend:"
+  iptables --version 2>&1 | sed 's/^/  /'
+  emit "iptables filter table (first 60 lines; may require sudo):"
+  as_root iptables -S 2>&1 | head -n 60 | sed 's/^/  /' || true
+else
+  note "iptables command not found."
+fi
+if have ip6tables; then
+  emit "ip6tables version/backend:"
+  ip6tables --version 2>&1 | sed 's/^/  /'
+else
+  note "ip6tables command not found; only matters for IPv6-enabled configurations."
+fi
+if have bridge; then
+  emit "Bridge interfaces:"
+  bridge link show 2>&1 | head -n 40 | sed 's/^/  /' || true
+else
+  note "'bridge' utility not found (usually provided by iproute2)."
+fi
+
+section "10. CNI AND KUBERNETES CONFIGURATION FILES"
+for d in /etc/cni/net.d /opt/cni/bin /etc/kubernetes /var/lib/kubelet /var/lib/containerd/io.containerd.grpc.v1.cri; do
+  if [[ -d "$d" ]]; then
+    emit "Directory exists: $d"
+    if [[ "$d" == "/etc/cni/net.d" ]]; then
+      find "$d" -maxdepth 1 -type f -printf '  %f\n' 2>/dev/null | head -n 30 || true
+      for f in "$d"/*; do
+        [[ -f "$f" ]] || continue
+        detail "CNI config: $f"
+        sed -n '1,80p' "$f" 2>/dev/null | sed 's/^/    | /' || true
+      done
+    elif [[ "$d" == "/etc/kubernetes" ]]; then
+      find "$d" -maxdepth 2 -type f -printf '  %p\n' 2>/dev/null | head -n 50 || true
+    fi
+  else
+    note "Directory not present: $d"
+  fi
+done
+if [[ -d /opt/cni/bin ]]; then
+  emit "CNI binaries:"
+  find /opt/cni/bin -maxdepth 1 -type f -printf '  %f\n' 2>/dev/null | sort | head -n 60 || true
+fi
+
+section "11. KUBERNETES TOOLS AND CLUSTER STATE"
+for cmd in kubeadm kubelet kubectl crictl; do
+  if have "$cmd"; then
+    emit "$cmd version:"
+    case "$cmd" in
+      kubectl) kubectl version --client 2>&1 | head -n 8 | sed 's/^/  /' || true ;;
+      kubeadm) kubeadm version -o short 2>&1 | sed 's/^/  /' || true ;;
+      kubelet) kubelet --version 2>&1 | sed 's/^/  /' || true ;;
+      crictl) crictl --version 2>&1 | sed 's/^/  /' || true ;;
+    esac
+  else
+    note "$cmd not installed."
+  fi
+done
+if have kubectl; then
+  emit "kubectl cluster reachability:"
+  KUBE_OUT=$(kubectl cluster-info 2>&1)
+  KUBE_RC=$?
+  if [[ $KUBE_RC -eq 0 ]]; then
+    pass "kubectl can reach a Kubernetes API server."
+    printf '%s\n' "$KUBE_OUT" | head -n 12 | sed 's/^/  /'
+    emit "Node summary:"
+    kubectl get nodes -o wide 2>&1 | head -n 15 | sed 's/^/  /' || true
+    emit "RuntimeClasses:"
+    kubectl get runtimeclass 2>&1 | head -n 25 | sed 's/^/  /' || true
+  else
+    note "kubectl could not reach a cluster using the current kubeconfig."
+    detail "$KUBE_OUT"
+  fi
+fi
+if have crictl; then
+  emit "CRI endpoint configuration:"
+  crictl config 2>&1 | head -n 30 | sed 's/^/  /' || true
+  emit "CRI containers (if runtime is reachable):"
+  as_root crictl ps -a 2>&1 | head -n 20 | sed 's/^/  /' || true
+fi
+
+section "12. COMMON KUBERNETES PORTS"
+if have ss; then
+  emit "Listening TCP sockets (common Kubernetes ports):"
+  ss -lnt 2>&1 | awk 'NR==1 || /:6443[[:space:]]|:2379[[:space:]]|:2380[[:space:]]|:10250[[:space:]]|:10257[[:space:]]|:10259[[:space:]]|:30000[[:space:]]|:32767[[:space:]]/' | sed 's/^/  /' || true
+  emit "Listening UDP sockets (common CNI/DNS ports):"
+  ss -lnu 2>&1 | awk 'NR==1 || /:53[[:space:]]|:4789[[:space:]]|:8472[[:space:]]|:51820[[:space:]]/' | sed 's/^/  /' || true
+else
+  note "'ss' unavailable; port checks skipped."
+fi
+note "Port requirements vary by cluster role, CNI, and enabled features; a listening port is context, not automatically a conflict."
+
+section "13. TIME, PACKAGE STATE AND LOGGING"
+emit "Time:"
+date 2>&1 | sed 's/^/  /'
+if have timedatectl; then timedatectl status 2>&1 | head -n 15 | sed 's/^/  /' || true; fi
+if have apt; then
+  emit "APT package-state summary:"
+  dpkg-query -W -f='${binary:Package}\t${Version}\t${db:Status-Abbrev}\n' 2>/dev/null \
+    | grep -E '^(containerd|containerd.io|docker|docker-ce|runc|runsc|gvisor|kubelet|kubeadm|kubectl|kubernetes-cni|cri-tools)' \
+    | head -n 40 | sed 's/^/  /' || true
+fi
+if have journalctl; then
+  emit "Recent kernel messages mentioning memory, filesystem, networking, or cgroups (last 30 matches):"
+  as_root journalctl -k -b --no-pager 2>/dev/null \
+    | grep -Ei 'oom|out of memory|I/O error|ext4.*error|mmc.*error|cgroup|overlay|br_netfilter|nf_tables|iptables|throttl|under.?voltage' \
+    | tail -n 30 | sed 's/^/  /' || true
+fi
+
+section "14. SUMMARY AND NEXT STEPS"
+emit "Counts: PASS=${PASS} WARN=${WARN} FAIL=${FAIL} INFO=${INFO}"
+if (( FAIL > 0 )); then
+  emit "RESULT: BLOCKERS FOUND — investigate FAIL items first."
+elif (( WARN > 0 )); then
+  emit "RESULT: CONDITIONALLY READY — review WARN items against your chosen Kubernetes distribution and CNI."
+else
+  emit "RESULT: NO OBVIOUS BLOCKERS FOUND — this is not a guarantee that cluster installation or gVisor CRI workloads will succeed."
+fi
+emit ""
+emit "Important interpretation notes:"
+emit "  - Docker's runsc runtime and containerd's CRI runtime configuration are separate."
+emit "  - A Docker gVisor smoke test does not prove Kubernetes can launch RuntimeClass workloads."
+emit "  - CRI plugin status, effective containerd config, CNI config, kubelet settings, and RuntimeClass testing are the key in-cluster checks."
+emit "  - Kernel module, bridge-filter, IPv6, and port warnings depend on your selected CNI and cluster configuration."
+emit "  - Run again with sudo for more complete service, journal, firewall, and config diagnostics."
+if [[ -n "$REPORT" ]]; then emit "Report saved to: $REPORT"; fi
+emit "Finished."
