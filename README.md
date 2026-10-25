@@ -299,6 +299,18 @@ I am trying to avoid adding an unnecessary compatibility layer with Docker. <br/
 Kubernetes removed its old direct Docker integration. Docker now needs ```cri-dockerd``` to satisfy CRI.<br/>
 ```containerd``` is clearly the cleaner route.
 
+## Preflight Check script
+Download the script:
+```
+curl -fsSL https://raw.githubusercontent.com/ndouglas-edera/gVisor-Pi5/refs/heads/main/k8s-gvisor-check.sh -o k8s-gvisor-check.sh
+chmod +x k8s-gvisor-check.sh
+```
+
+Run the script:
+```
+./k8s-gvisor-check.sh
+```
+
 <br/><br/>
 Instant shutdown of my Raspberry Pi sitting at home
 ```
