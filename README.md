@@ -369,8 +369,8 @@ handler: runsc
 EOF
 ```
 
-This tells Kubernetes to use the ```runsc``` containerd runtime handler for Pods that specify ```runtimeClassName: gvisor```.<br/>
-It does not change the runtime used by other Pods.
+Tells Kubernetes to use ```runsc``` containerd runtime handler for Pods specifying ```runtimeClassName: gvisor```.<br/>
+*It does not change the runtime used by other Pods.*
 ```
 kubectl get runtimeclass gvisor
 ```
