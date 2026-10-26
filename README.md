@@ -357,6 +357,49 @@ sudo runsc --version
 sudo test -x /usr/bin/containerd-shim-runsc-v1 && echo "gVisor shim found" || echo "gVisor shim missing"
 ```
 
+## gVisor on Kubernetes
+Register the gVisor ```RuntimeClass```:
+```
+cat <<'EOF' | kubectl apply -f -
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runsc
+EOF
+```
+
+This tells Kubernetes to use the ```runsc``` containerd runtime handler for Pods that specify ```runtimeClassName: gvisor```.<br/>
+It does not change the runtime used by other Pods.
+```
+kubectl get runtimeclass gvisor
+```
+
+Launch a test Pod under gVisor
+```
+cat <<'EOF' | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gvisor-smoke
+spec:
+  runtimeClassName: gvisor
+  restartPolicy: Never
+  containers:
+    - name: test
+      image: busybox:1.36
+      command: ["sh", "-c", "echo 'Hello from the gVisor sandbox'; uname -a; sleep 3600"]
+EOF
+```
+
+Verify the ```Sandbox```
+```
+kubectl get pod gvisor-smoke -o wide
+kubectl get pod gvisor-smoke -o jsonpath='{.spec.runtimeClassName}{"\n"}'
+kubectl logs gvisor-smoke
+kubectl exec gvisor-smoke -- uname -a
+```
+
 <br/><br/>
 Instant shutdown of my Raspberry Pi sitting at home
 ```
