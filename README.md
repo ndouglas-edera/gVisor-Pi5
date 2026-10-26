@@ -52,7 +52,8 @@ https://edera.dev/stories/why-xen-architecture-beats-kvm-for-agent-isolation-cve
 
 <img width="1028" height="712" alt="gvisor" src="https://github.com/user-attachments/assets/d0e8c440-f194-4301-8aab-8d813c1f9696" />
 
-<img width="1028" height="712" alt="docker_gvisor_edera_isolation_layers" src="https://github.com/user-attachments/assets/f3399b29-c009-4a45-9871-b64d5acd085d" />
+<img width="1020" height="779" alt="gvisor2" src="https://github.com/user-attachments/assets/64f04277-0ef8-4611-bb01-9e0e771d9741" />
+
 
 
 
