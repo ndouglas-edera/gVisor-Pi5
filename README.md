@@ -57,13 +57,12 @@ https://edera.dev/stories/why-xen-architecture-beats-kvm-for-agent-isolation-cve
 What’s different from the Kata version
 
 - **The hypervisor moves under the host kernel** <br/>
-KVM is a module inside the host Linux kernel, so in the original it lived in the yellow band.  <br/>
-Xen is type-1: it boots first and sits directly on the hardware. <br/>
+KVM is a module inside the host Linux kernel. Xen is type-1: it boots first and sits directly on hardware. <br/>
 The host kernel becomes dom0, a privileged guest VM sitting beside the zones, not under them. <br/>
 On Xen, the hypervisor owns all physical memory and hands it to domains as dom0 instructs, and neither dom0 nor the zones can touch memory that wasn’t explicitly granted to them.
 - **No VMM with fake devices.**<br/>
-Kata’s escape path ran through a VMM emulating hardware (the “fake devices” box). <br/>
-Edera’s zones are paravirtualized: they talk to the hypervisor through hypercalls instead of executing privileged CPU instructions <br/>
+Kata’s escape path ran through a VMM emulating hardware -  Edera’s zones are paravirtualised<br/>
+They talk to the hypervisor through hypercalls instead of executing privileged CPU instructions <br/>
 I/O goes over shared-memory rings to backend drivers in dom0.
 - **No nested virtualisation needed** <br/>
 Edera was built not to require hardware virtualisation because it’s often unavailable across clouds and instance types.  <br/>
