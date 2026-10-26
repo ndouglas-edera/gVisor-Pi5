@@ -54,7 +54,29 @@ https://edera.dev/stories/why-xen-architecture-beats-kvm-for-agent-isolation-cve
 
 <img width="1020" height="779" alt="gvisor2" src="https://github.com/user-attachments/assets/64f04277-0ef8-4611-bb01-9e0e771d9741" />
 
+What’s different from the Kata version
 
+- The hypervisor moves under the host kernel. <br/>
+KVM is a module inside the host Linux kernel, so in the original it lived in the yellow band.  <br/>
+Xen is type-1: it boots first and sits directly on the hardware. <br/>
+The “host” Linux kernel becomes dom0, a privileged guest VM sitting beside the zones, not under them. <br/>
+On Xen, the hypervisor owns all physical memory and hands it to domains as dom0 instructs, and neither dom0 nor the zones can touch memory that wasn’t explicitly granted to them.
+- No VMM with fake devices. Kata’s escape path ran through a VMM emulating hardware (the “fake devices” box). <br/>
+Edera’s zones are paravirtualized: they talk to the hypervisor through hypercalls instead of executing privileged CPU instructions <br/>
+I/O goes over shared-memory rings to backend drivers in dom0. <br/>
+So the red dashed boxes on the right are now the zone kernel, Xen itself, and the PV backends — not a guest kernel plus VMM plus KVM.
+- No nested virtualization needed. <br/>
+That’s the practical reason for PV: Edera was built not to require hardware virtualization because it’s often unavailable across clouds and instance types.  <br/>
+Where the CPU does support it, Xen offers PVH (PV with hardware assistance).
+- One zone per pod, not per container. <br/>
+In Kubernetes, Edera plugs in through RuntimeClass and isolates per pod.
+- Rust control plane. <br/>
+Edera starts from Xen but rebuilds most of the components in Rust; Xen’s core is still the C hypervisor.
+- Backends can leave dom0. <br/>
+Edera supports driver zones, which provide services to other zones, so the “dom0 backends” red box can be moved into its own isolated VM — something I left out of the drawing to keep it readable. 
+
+
+One simplification to know about: in this diagram, the Docker and gVisor columns sit on a plain host Linux kernel, while the Edera column has Xen underneath. On a real Edera node, the whole machine boots under Xen with Linux as dom0. Also, Edera has a planned KVM backend; zones currently run on Xen, so the KVM version of this picture may become relevant later. 
 
 
 ## Check that gVisor is installed and working
