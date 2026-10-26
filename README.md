@@ -73,7 +73,8 @@ In Kubernetes, Edera plugs in through RuntimeClass and isolates per pod.
 - **Rust control plane** <br/>
 Edera starts from Xen but rebuilds most of the components in Rust; Xen’s core is still the C hypervisor.
 - **Backends can leave dom0** <br/>
-Edera supports driver zones, which provide services to other zones, so the dom0 backend redbox can be moved into its own VM
+Edera supports driver zones, which provide services to other zones, <br/>
+so the dom0 backend can be moved into its own isolated VM
 
 
 One simplification to know about: in this diagram, the Docker and gVisor columns sit on a plain host Linux kernel, while the Edera column has Xen underneath. 
