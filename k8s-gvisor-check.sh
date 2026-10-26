@@ -10,11 +10,12 @@
 #
 # Usage:
 #   sudo ./k8s-gvisor-check.sh
+
 set -uo pipefail
 export LC_ALL=C
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
-VERSION="2.0.0"
+VERSION="2.1.0"
 PASS=0
 WARN=0
 FAIL=0
@@ -344,6 +345,36 @@ if have systemctl; then
   as_root systemctl status containerd --no-pager 2>&1 | sed 's/^/  /' || true
 else
   note "systemctl is not available; cannot run the containerd status follow-up command."
+fi
+
+section "5B. FINAL CRI ENDPOINT VERIFICATION"
+CRI_SOCKET="/run/containerd/containerd.sock"
+CRI_ENDPOINT="unix://${CRI_SOCKET}"
+emit "Target CRI endpoint: ${CRI_ENDPOINT}"
+if [[ -S "$CRI_SOCKET" ]]; then
+  pass "Containerd CRI socket exists at $CRI_SOCKET."
+else
+  fail "Expected containerd CRI socket not found at $CRI_SOCKET."
+  detail "Kubernetes normally uses ${CRI_ENDPOINT} for containerd; verify the active containerd socket before changing configuration."
+fi
+
+if have crictl; then
+  emit "Explicit CRI runtime endpoint test:"
+  emit "  crictl --runtime-endpoint ${CRI_ENDPOINT} info"
+  CRI_OUT=$(as_root crictl --runtime-endpoint "$CRI_ENDPOINT" info 2>&1)
+  CRI_RC=$?
+  printf '%s\n' "$CRI_OUT" | head -n 45 | sed 's/^/  /'
+  if [[ $CRI_RC -eq 0 ]]; then
+    pass "CRI endpoint is responding successfully to the RuntimeService API."
+    pass "The node's live CRI endpoint is reachable; it is reasonable to proceed to containerd configuration changes, subject to reviewing the output above."
+  else
+    warn "CRI endpoint verification failed (exit $CRI_RC). Do not change containerd CRI configuration yet."
+    detail "The command above must return successfully before treating the live CRI endpoint as verified."
+  fi
+else
+  warn "Cannot perform final CRI endpoint verification because 'crictl' is not installed."
+  detail "Install cri-tools/crictl first, then rerun this script. The required test is: crictl --runtime-endpoint ${CRI_ENDPOINT} info"
+  detail "A healthy 'ctr plugins ls' result alone is not sufficient to prove that the CRI RuntimeService endpoint is usable by Kubernetes."
 fi
 
 section "6. GVISOR RUNTIME"
