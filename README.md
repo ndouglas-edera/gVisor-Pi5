@@ -351,6 +351,12 @@ Then test the CRI endpoint:
 ```
 sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock info
 ```
+gVisor shim found:
+```
+sudo runsc --version
+sudo test -x /usr/bin/containerd-shim-runsc-v1 && echo "gVisor shim found" || echo "gVisor shim missing"
+```
+
 <br/><br/>
 Instant shutdown of my Raspberry Pi sitting at home
 ```
