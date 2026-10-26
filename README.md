@@ -59,7 +59,8 @@ What’s different from the Kata version
 - **The hypervisor moves under the host kernel** <br/>
 KVM is a module inside the host Linux kernel. Xen is type-1: it boots first and sits directly on hardware. <br/>
 The host kernel becomes dom0, a privileged guest VM sitting beside the zones, not under them. <br/>
-On Xen, the hypervisor owns all physical memory and hands it to domains as dom0 instructs, and neither dom0 nor the zones can touch memory that wasn’t explicitly granted to them.
+On Xen, the hypervisor owns all physical memory and hands it to domains as dom0 instructs, <br/>
+and neither dom0 nor the zones can touch memory that wasn’t explicitly granted to them.
 - **No VMM with fake devices.**<br/>
 Kata’s escape path ran through a VMM emulating hardware -  Edera’s zones are paravirtualised<br/>
 They talk to the hypervisor through hypercalls instead of executing privileged CPU instructions <br/>
@@ -75,7 +76,8 @@ Edera starts from Xen but rebuilds most of the components in Rust; Xen’s core 
 Edera supports driver zones, which provide services to other zones, so the dom0 backend redbox can be moved into its own VM
 
 
-One simplification to know about: in this diagram, the Docker and gVisor columns sit on a plain host Linux kernel, while the Edera column has Xen underneath. On a real Edera node, the whole machine boots under Xen with Linux as dom0. Also, Edera has a planned KVM backend; zones currently run on Xen, so the KVM version of this picture may become relevant later. 
+One simplification to know about: in this diagram, the Docker and gVisor columns sit on a plain host Linux kernel, while the Edera column has Xen underneath. 
+On a real Edera node, the whole machine boots under Xen with Linux as dom0. Also, Edera has a planned KVM backend; zones currently run on Xen, so the KVM version of this picture may become relevant later. 
 
 
 ## Check that gVisor is installed and working
