@@ -399,6 +399,11 @@ kubectl get pod gvisor-smoke -o jsonpath='{.spec.runtimeClassName}{"\n"}'
 kubectl logs gvisor-smoke
 kubectl exec gvisor-smoke -- uname -a
 ```
+If the pod does not start:
+```
+kubectl describe pod gvisor-smoke
+sudo journalctl -u containerd -n 80 --no-pager
+```
 
 <br/><br/>
 Instant shutdown of my Raspberry Pi sitting at home
