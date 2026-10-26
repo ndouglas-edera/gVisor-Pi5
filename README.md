@@ -50,7 +50,9 @@ However, containers don't really contain - especially not for AI agents.
 The below article covers the terminology of Linux Kernel, Hypervisor, KVM, VMM, (µ)VMs, and more.<br/>
 https://edera.dev/stories/why-xen-architecture-beats-kvm-for-agent-isolation-cve-2026-99999
 
-<img width="1928" height="1412" alt="gvisor" src="https://github.com/user-attachments/assets/d0e8c440-f194-4301-8aab-8d813c1f9696" />
+<img width="1028" height="712" alt="gvisor" src="https://github.com/user-attachments/assets/d0e8c440-f194-4301-8aab-8d813c1f9696" />
+
+<img width="1028" height="712" alt="docker_gvisor_edera_isolation_layers" src="https://github.com/user-attachments/assets/f3399b29-c009-4a45-9871-b64d5acd085d" />
 
 
 
