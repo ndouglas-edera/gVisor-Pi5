@@ -42,6 +42,18 @@ sudo sed -i 's/^127\.0\.1\.1.*/127.0.1.1 gvisor/' /etc/cloud/templates/hosts.deb
 
 <img width="1011" height="208" alt="Screenshot 2026-10-24 at 17 05 40" src="https://github.com/user-attachments/assets/a2500278-094c-490d-a797-9c0ebe025059" />
 
+## How gVisor differs from Edera and Kata Containers
+
+We have all been using Docker for over a decade as a way of compartmentalising web apps. <br/>
+However, containers don't really contain - especially not for AI agents. 
+
+The below article covers the terminology of Linux Kernel, Hypervisor, KVM, VMM, (µ)VMs, and more.<br/>
+https://edera.dev/stories/why-xen-architecture-beats-kvm-for-agent-isolation-cve-2026-99999
+
+<img width="1928" height="1412" alt="gvisor" src="https://github.com/user-attachments/assets/d0e8c440-f194-4301-8aab-8d813c1f9696" />
+
+
+
 ## Check that gVisor is installed and working
 
 Show the ```version``` of gVisor installed:
