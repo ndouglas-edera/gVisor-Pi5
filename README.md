@@ -334,7 +334,23 @@ sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock info
 ```
 That means ```containerd``` was not currently serving the **CRI v1 RuntimeService** at the socket I was testing. <br/>
 Kubernetes cannot use that endpoint successfully yet, so I cannot deploy Kubernetes or change the gVisor runtime configuration just yet.
-
+<br/><br/>
+Fixed the CRI issues:
+```
+sudo cp -a /etc/containerd/config.toml /etc/containerd/config.toml.bak &&
+sudo sed -i 's/^[[:space:]]*disabled_plugins[[:space:]]*=[[:space:]]*\["cri"\]/disabled_plugins = []/' /etc/containerd/config.toml &&
+sudo containerd config dump >/dev/null &&
+sudo systemctl restart containerd &&
+sudo systemctl is-active containerd
+```
+Verify CRI is working
+```
+sudo ctr plugins ls | grep -i cri
+```
+Then test the CRI endpoint:
+```
+sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock info
+```
 <br/><br/>
 Instant shutdown of my Raspberry Pi sitting at home
 ```
