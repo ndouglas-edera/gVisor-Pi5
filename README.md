@@ -332,6 +332,8 @@ Error - ```Unimplemented desc = unknown service runtime.v1.RuntimeService```
 ```
 sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock info
 ```
+That means ```containerd``` was not currently serving the **CRI v1 RuntimeService** at the socket I was testing. <br/>
+Kubernetes cannot use that endpoint successfully yet, so I cannot deploy Kubernetes or change the gVisor runtime configuration just yet.
 
 <br/><br/>
 Instant shutdown of my Raspberry Pi sitting at home
