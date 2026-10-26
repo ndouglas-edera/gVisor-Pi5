@@ -311,10 +311,26 @@ Run the script and save the report as ```k8s-gvisor-report.txt```
 sudo ./k8s-gvisor-check.sh 2>&1 | tee k8s-gvisor-report.txt
 ```
 
-On my macbook, I can move the files from the Pi5 to my local Desktop directory and check the file:
+On my MacBook, I can move the files from the Pi5 to my local Desktop directory and check the file:
 ```
 scp nigeldouglas@100.115.36.12:~/k8s-gvisor-report.txt ~/Desktop/
 ls -lh ~/Desktop/k8s-gvisor-report.txt
+```
+
+## Installing CRIctl
+I need ```critctl``` to debug Kubernetes nodes: <br/>
+https://kubernetes.io/docs/tasks/debug/debug-cluster/crictl/
+```
+CRICTL_VERSION=v1.37.0
+curl -LO "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRICTL_VERSION}/crictl-${CRICTL_VERSION}-linux-arm64.tar.gz"
+sudo tar -C /usr/local/bin -xzf "crictl-${CRICTL_VERSION}-linux-arm64.tar.gz"
+rm "crictl-${CRICTL_VERSION}-linux-arm64.tar.gz"
+crictl --version
+```
+
+Error - ```Unimplemented desc = unknown service runtime.v1.RuntimeService```
+```
+sudo crictl --runtime-endpoint unix:///run/containerd/containerd.sock info
 ```
 
 <br/><br/>
